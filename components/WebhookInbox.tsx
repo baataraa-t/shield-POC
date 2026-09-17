@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { WebhookDelivery } from "@/lib/shield/types";
 
 export function WebhookInbox() {
   const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const ignoreRef = useRef(false);
 
   const load = useCallback(async () => {
+    if (ignoreRef.current) return;
     try {
       const response = await fetch("/api/shield/webhook", { cache: "no-store" });
       const data = (await response.json()) as {
@@ -17,17 +19,25 @@ export function WebhookInbox() {
       if (!response.ok) {
         throw new Error(data.error ?? "Failed to load webhook deliveries");
       }
+      if (ignoreRef.current) return;
       setDeliveries(data.deliveries ?? []);
       setError(null);
     } catch (err) {
+      if (ignoreRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load webhooks");
     }
   }, []);
 
   useEffect(() => {
-    void load();
+    ignoreRef.current = false;
+    if (!ignoreRef.current) {
+      void load();
+    }
     const timer = window.setInterval(() => void load(), 4000);
-    return () => window.clearInterval(timer);
+    return () => {
+      ignoreRef.current = true;
+      window.clearInterval(timer);
+    };
   }, [load]);
 
   return (

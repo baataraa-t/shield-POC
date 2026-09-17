@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -30,25 +31,36 @@ export function ShieldProvider({ children }: { children: ReactNode }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [payload, setPayload] = useState<ShieldClientResponse | null>(null);
 
+  const ignoreRef = useRef(false);
+
   const refresh = useCallback(async (userId?: string) => {
+    if (ignoreRef.current) return;
     setLoading(true);
     setError(null);
 
     try {
       const response = await getDeviceIntelligence(userId);
+      if (ignoreRef.current) return;
       setPayload(response);
       setSessionId(response.result?.session_id ?? null);
       setReady(true);
     } catch (err) {
+      if (ignoreRef.current) return;
       setError(formatShieldError(err));
       setReady(false);
     } finally {
-      setLoading(false);
+      if (!ignoreRef.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
+    ignoreRef.current = false;
+    if (!ignoreRef.current) {
+      void refresh();
+    }
+    return () => {
+      ignoreRef.current = true;
+    };
   }, [refresh]);
 
   const value = useMemo(

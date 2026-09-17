@@ -37,7 +37,10 @@ export default async function ResultPage({ searchParams }: ResultPageProps) {
             </span>
           </div>
 
-          <h2 className="mt-6 text-2xl font-semibold text-zinc-900">
+          <h2
+            data-testid="result-heading"
+            className="mt-6 text-2xl font-semibold text-zinc-900"
+          >
             {decision === "allow" && "Access granted"}
             {decision === "challenge" && "Step-up verification required"}
             {decision === "block" && "Access denied"}
@@ -53,7 +56,7 @@ export default async function ResultPage({ searchParams }: ResultPageProps) {
             <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
               Decision reasons
             </h3>
-            <ul className="mt-3 space-y-2">
+            <ul data-testid="result-reasons" className="mt-3 space-y-2">
               {reasons.map((reason) => (
                 <li
                   key={reason}

@@ -35,6 +35,9 @@ function getConfig(): ShieldConfig {
   };
 }
 
+/* v8 ignore start -- unreachable: getConfig() always defaults apiEndpoint,
+ * so resolveEndpoint() below returns before ever calling discoverEndpoint().
+ * Kept for when SHIELD service discovery is re-enabled for this site. */
 function discoveryUrl(siteId: string, staging: boolean): string {
   const host = staging
     ? "svc-discovery-staging.shield.com"
@@ -119,6 +122,7 @@ async function discoverEndpoint(
 
   throw new Error(discoveryErrorMessage(first.status, first.body, preferStaging));
 }
+/* v8 ignore stop */
 
 async function resolveEndpoint(config: ShieldConfig): Promise<{
   url: string;
@@ -131,10 +135,12 @@ async function resolveEndpoint(config: ShieldConfig): Promise<{
     };
   }
 
+  /* v8 ignore start -- unreachable, see discoverEndpoint above */
   if (cachedEndpoint) return cachedEndpoint;
 
   cachedEndpoint = await discoverEndpoint(config.siteId, config.secretKey);
   return cachedEndpoint;
+  /* v8 ignore stop */
 }
 
 export async function fetchDeviceIntelligence(

@@ -7,16 +7,21 @@ function SignalRow({
   label,
   value,
   risky,
+  testId,
 }: {
   label: string;
   value: string | number | boolean | undefined;
   risky?: boolean;
+  testId?: string;
 }) {
   const display =
     typeof value === "boolean" ? (value ? "Yes" : "No") : (value ?? "—");
 
   return (
-    <div className="flex items-center justify-between border-b border-zinc-100 py-3 last:border-b-0">
+    <div
+      data-testid={testId}
+      className="flex items-center justify-between border-b border-zinc-100 py-3 last:border-b-0"
+    >
       <span className="text-sm text-zinc-600">{label}</span>
       <span
         className={`text-sm font-medium ${risky ? "text-rose-700" : "text-zinc-900"}`}
@@ -115,41 +120,49 @@ export function InspectorPanel() {
             </h3>
             <div className="mt-4 grid gap-0 md:grid-cols-2">
               <SignalRow
+                testId="signal-is-bot"
                 label="Bot"
                 value={intelligence?.is_bot}
                 risky={Boolean(intelligence?.is_bot)}
               />
               <SignalRow
+                testId="signal-is-emulated"
                 label="Emulator"
                 value={intelligence?.is_emulated}
                 risky={Boolean(intelligence?.is_emulated)}
               />
               <SignalRow
+                testId="signal-is-browser-spoofed"
                 label="Browser spoofed"
                 value={intelligence?.is_browser_spoofed}
                 risky={Boolean(intelligence?.is_browser_spoofed)}
               />
               <SignalRow
+                testId="signal-is-proxy"
                 label="Proxy / VPN"
                 value={intelligence?.is_proxy}
                 risky={Boolean(intelligence?.is_proxy)}
               />
               <SignalRow
+                testId="signal-is-tor"
                 label="Tor"
                 value={intelligence?.is_tor}
                 risky={Boolean(intelligence?.is_tor)}
               />
               <SignalRow
+                testId="signal-is-incognito"
                 label="Incognito"
                 value={intelligence?.is_incognito}
                 risky={Boolean(intelligence?.is_incognito)}
               />
               <SignalRow
+                testId="signal-is-anti-fingerprinting"
                 label="Anti-fingerprinting"
                 value={intelligence?.is_anti_fingerprinting}
                 risky={Boolean(intelligence?.is_anti_fingerprinting)}
               />
               <SignalRow
+                testId="signal-prv-set"
                 label="Privacy settings"
                 value={intelligence?.prv_set}
                 risky={Boolean(intelligence?.prv_set)}
