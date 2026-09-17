@@ -9,6 +9,8 @@ const styles: Record<FraudDecision, string> = {
 export function DecisionBadge({ decision }: { decision: FraudDecision }) {
   return (
     <span
+      data-testid="decision-badge"
+      data-decision={decision}
       className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold uppercase tracking-wide ring-1 ring-inset ${styles[decision]}`}
     >
       {decision}

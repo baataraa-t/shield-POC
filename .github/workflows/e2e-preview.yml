@@ -1,0 +1,253 @@
+name: E2E on Vercel Preview
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+  deployments: read
+  pull-requests: write
+  checks: read
+  actions: read
+
+jobs:
+  e2e:
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      !contains(github.event.deployment_status.environment, 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      pr_number: ${{ steps.pr.outputs.result }}
+    steps:
+      - name: Show target
+        run: |
+          echo "Preview URL: ${{ github.event.deployment_status.target_url }}"
+          echo "Environment: ${{ github.event.deployment_status.environment }}"
+          if [ -n "${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" ]; then
+            echo "Bypass secret configured: yes"
+          else
+            echo "Bypass secret configured: no"
+          fi
+
+      - name: Find PR for this commit
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.payload.deployment.sha,
+            });
+            const open = prs.find((p) => p.state === "open") ?? prs[0];
+            if (!open) {
+              core.info("No PR found for this commit, skipping comment.");
+              return "";
+            }
+            core.info(`Found PR #${open.number}`);
+            return String(open.number);
+          result-encoding: string
+
+      # Quality checks run in a separate `pull_request`-triggered workflow, so
+      # they cannot be chained with `needs:`. Read their result for this same
+      # commit instead. Fail-open on anything ambiguous (queued/in-progress/
+      # cancelled/not-found) — a gate that silently stops e2e from ever running
+      # is worse than one that occasionally runs early.
+      - name: Check quality gate
+        id: gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.checks.listForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.payload.deployment.sha,
+            });
+            const relevant = data.check_runs.filter((c) =>
+              ["Lint + typecheck", "Unit tests + coverage"].includes(c.name),
+            );
+            const failed = relevant.find(
+              (c) => c.status === "completed" &&
+                ["failure", "timed_out"].includes(c.conclusion ?? ""),
+            );
+            if (failed) {
+              core.info(`Quality gate failed: ${failed.name}`);
+              return "skip";
+            }
+            return "proceed";
+          result-encoding: string
+
+      - name: Find quality workflow run for this commit
+        id: quality_run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "pull-request.yml",
+              head_sha: context.payload.deployment.sha,
+            });
+            const run = data.workflow_runs[0];
+            return run ? String(run.id) : "";
+          result-encoding: string
+
+      # Checkout before downloading the artifact: actions/checkout defaults to
+      # `clean: true` (git clean -ffdx before checkout), which would delete an
+      # already-downloaded coverage/ directory if the order were reversed.
+      # Using the commit sha (not deployment.ref) also fixes fork PRs, where
+      # the head ref doesn't exist in the base repo.
+      - name: Checkout deployed commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download coverage artifact
+        if: steps.quality_run.outputs.result != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.quality_run.outputs.result }}
+
+      - name: Install Playwright browsers
+        if: steps.gate.outputs.result == 'proceed'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        if: steps.gate.outputs.result == 'proceed'
+        id: tests
+        continue-on-error: true
+        env:
+          BASE_URL: ${{ github.event.deployment_status.target_url }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: npx playwright test
+
+      - name: Upload HTML report
+        if: always() && steps.gate.outputs.result == 'proceed'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Render PR comment
+        if: always() && steps.pr.outputs.result != ''
+        env:
+          GATE_SKIPPED: ${{ steps.gate.outputs.result == 'skip' }}
+          PREVIEW_URL: ${{ github.event.deployment_status.target_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ steps.pr.outputs.result }}/
+        run: node .github/scripts/render-comment.mjs
+
+      - name: Post PR comment
+        if: always() && steps.pr.outputs.result != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const prNumber = Number("${{ steps.pr.outputs.result }}");
+            const marker = "<!-- e2e-preview-report -->";
+            const body = fs.readFileSync("comment-body.md", "utf8");
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find((c) => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }
+
+      - name: Fail job if gated or tests failed
+        if: steps.gate.outputs.result == 'skip' || steps.tests.outcome == 'failure'
+        run: exit 1
+
+  # Isolated on purpose: `e2e` above checks out a PR ref and runs `npm ci`,
+  # which executes arbitrary postinstall scripts from a fork PR. Granting
+  # that job `contents: write` would let a malicious fork PR push to this
+  # repo. This job only downloads an artifact and pushes to `gh-pages` — it
+  # never checks out PR code or installs PR dependencies.
+  publish-coverage:
+    # `always()` because the `e2e` job intentionally fails (exit 1) when the
+    # quality gate skips it or tests fail — that must not also skip
+    # publishing the coverage report, which is independent of e2e's outcome.
+    if: >
+      always() &&
+      github.event.deployment_status.state == 'success' &&
+      !contains(github.event.deployment_status.environment, 'Production')
+    needs: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: gh-pages
+      cancel-in-progress: false
+    steps:
+      # No `ref:` — checks out the default branch, not the PR. This job
+      # never runs PR code (no npm ci/build), it only needs a git repo
+      # present so actions-gh-pages can push. Checking out the default
+      # branch keeps the fork-PR isolation described above intact.
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+
+      - name: Find quality workflow run for this commit
+        id: quality_run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "pull-request.yml",
+              head_sha: context.payload.deployment.sha,
+            });
+            const run = data.workflow_runs[0];
+            return run ? String(run.id) : "";
+          result-encoding: string
+
+      - name: Download coverage artifact
+        if: steps.quality_run.outputs.result != '' && needs.e2e.outputs.pr_number != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-unit
+          path: coverage/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.quality_run.outputs.result }}
+
+      - name: Publish to GitHub Pages
+        if: steps.quality_run.outputs.result != '' && needs.e2e.outputs.pr_number != ''
+        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v3.9.3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: coverage/lcov-report
+          destination_dir: pr-${{ needs.e2e.outputs.pr_number }}
+          keep_files: true

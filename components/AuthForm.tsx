@@ -72,6 +72,7 @@ export function AuthForm({ mode }: AuthFormProps) {
   return (
     <form
       onSubmit={handleSubmit}
+      data-testid="auth-form"
       className="mx-auto max-w-md rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm"
     >
       <h2 className="text-2xl font-semibold capitalize text-zinc-900">{mode}</h2>
@@ -116,13 +117,17 @@ export function AuthForm({ mode }: AuthFormProps) {
       </label>
 
       {error ? (
-        <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        <p
+          data-testid="auth-form-error"
+          className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800"
+        >
           {error}
         </p>
       ) : null}
 
       <button
         type="submit"
+        data-testid="auth-form-submit"
         disabled={submitting || !ready || Boolean(shieldError)}
         className="mt-6 w-full rounded-full bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
       >
